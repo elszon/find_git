@@ -6,33 +6,6 @@ import (
 	"path/filepath"
 )
 
-// findGitRepos traverses the directory tree starting from root
-// and returns a list of directories that contain .git folders
-func findGitRepos(root string) ([]string, error) {
-	var gitRepos []string
-
-	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			// Skip directories we can't access
-			return filepath.SkipDir
-		}
-
-		// Check if this directory contains a .git folder
-		if d.IsDir() {
-			gitPath := filepath.Join(path, ".git")
-			_, err := os.Stat(gitPath)
-			if err == nil {
-				gitRepos = append(gitRepos, path)
-				return filepath.SkipDir
-			}
-		}
-
-		return nil
-	})
-
-	return gitRepos, err
-}
-
 func main() {
 	root, err := os.Getwd()
 	if err != nil {
@@ -54,10 +27,46 @@ func main() {
 
 	for _, repo := range gitRepos {
 		// Make the path relative to the search root for cleaner output
-		relPath, err := filepath.Rel(absRoot, repo)
-		if err != nil {
+		relPath, relErr := filepath.Rel(absRoot, repo)
+		if relErr != nil {
 			relPath = repo
 		}
 		fmt.Println(relPath)
 	}
+}
+
+// findGitRepos traverses the directory tree starting from root
+// and returns a list of directories that contain .git folders
+func findGitRepos(root string) ([]string, error) {
+	var gitRepos []string
+
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return filepath.SkipDir
+		}
+
+		// Skip symlinks to avoid infinite loops
+		if d.IsDir() && isSymlink(d) {
+			return filepath.SkipDir
+		}
+
+		// Check if this directory contains a .git folder
+		if d.IsDir() {
+			gitPath := filepath.Join(path, ".git")
+			// Use Lstat instead of Stat (faster, doesn't follow symlinks)
+			if _, statErr := os.Lstat(gitPath); statErr == nil {
+				relPath, _ := filepath.Rel(root, path)
+				gitRepos = append(gitRepos, relPath)
+				return filepath.SkipDir
+			}
+		}
+
+		return nil
+	})
+
+	return gitRepos, err
+}
+
+func isSymlink(d os.DirEntry) bool {
+	return d.Type()&os.ModeSymlink != 0
 }
